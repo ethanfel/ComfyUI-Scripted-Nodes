@@ -56,6 +56,12 @@ The Python code runs when ComfyUI executes the node.
 The code and applied schema are stored in the workflow. After changing
 `INPUTS` or `OUTPUTS`, apply the schema again before queuing.
 
+## Script collection
+
+Ready-to-paste examples live in [`scripts/`](scripts/README.md). The first
+example, [`line_from_file.py`](scripts/text/line_from_file.py), reads a UTF-8
+text file and returns a requested 1-based line.
+
 ## Script format
 
 Every script has three parts:
