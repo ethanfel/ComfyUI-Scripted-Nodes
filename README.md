@@ -61,9 +61,11 @@ The code and applied schema are stored in the workflow. After changing
 
 ## Script collection
 
-Ready-to-paste examples live in [`scripts/`](scripts/README.md). The first
-example, [`line_from_file.py`](scripts/text/line_from_file.py), reads a UTF-8
-text file and returns a requested 1-based line.
+Ready-to-paste examples live in [`scripts/`](scripts/README.md).
+[`load_text_file.py`](scripts/text/load_text_file.py) returns an entire UTF-8
+text file with numbered lines, while
+[`line_from_file.py`](scripts/text/line_from_file.py) returns a requested
+1-based line.
 
 ## Saved script library
 

@@ -10,6 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND_MODULE_NAME = "_scripted_node_collection_tests"
 LINE_FROM_FILE = ROOT / "scripts" / "text" / "line_from_file.py"
+LOAD_TEXT_FILE = ROOT / "scripts" / "text" / "load_text_file.py"
 
 
 def _load_backend():
@@ -29,13 +30,14 @@ def _load_backend():
 
 
 backend = _load_backend()
-CODE = LINE_FROM_FILE.read_text(encoding="utf-8")
+LINE_CODE = LINE_FROM_FILE.read_text(encoding="utf-8")
+LOAD_CODE = LOAD_TEXT_FILE.read_text(encoding="utf-8")
 
 
 def _run(file_path: Path | str, line_number: int) -> str:
-    schema = backend.parse_script_schema(CODE)
+    schema = backend.parse_script_schema(LINE_CODE)
     result = backend.ComfyScriptedNode().execute(
-        code=CODE,
+        code=LINE_CODE,
         schema_json=backend.schema_to_json(schema),
         file_path=str(file_path),
         line_number=line_number,
@@ -44,7 +46,7 @@ def _run(file_path: Path | str, line_number: int) -> str:
 
 
 def test_line_from_file_declares_expected_schema():
-    schema = backend.parse_script_schema(CODE)
+    schema = backend.parse_script_schema(LINE_CODE)
 
     assert schema.inputs == [
         {"name": "file_path", "type": "STRING", "options": {}},
@@ -110,3 +112,58 @@ def test_line_from_file_reports_a_missing_file(tmp_path):
         match="FileNotFoundError",
     ):
         _run(missing, 1)
+
+
+def _load_file(file_path: Path | str) -> str:
+    schema = backend.parse_script_schema(LOAD_CODE)
+    result = backend.ComfyScriptedNode().execute(
+        code=LOAD_CODE,
+        schema_json=backend.schema_to_json(schema),
+        file_path=str(file_path),
+    )
+    return result[0]
+
+
+def test_load_text_file_declares_expected_schema():
+    schema = backend.parse_script_schema(LOAD_CODE)
+
+    assert schema.inputs == [
+        {"name": "file_path", "type": "STRING", "options": {}},
+    ]
+    assert schema.outputs == [
+        {"name": "content", "type": "STRING"},
+    ]
+
+
+def test_load_text_file_returns_complete_content_with_line_numbers(tmp_path):
+    text_file = tmp_path / "document.txt"
+    text_file.write_bytes(
+        b"\xef\xbb\xbfalpha\r\ncaf\xc3\xa9\r\n\r\nomega\r\n"
+    )
+
+    assert _load_file(text_file) == "1: alpha\n2: café\n3: \n4: omega"
+
+
+def test_load_text_file_returns_an_empty_string_for_an_empty_file(tmp_path):
+    text_file = tmp_path / "empty.txt"
+    text_file.write_bytes(b"")
+
+    assert _load_file(text_file) == ""
+
+
+def test_load_text_file_rejects_an_empty_path():
+    with pytest.raises(
+        backend.ScriptExecutionError,
+        match="file_path cannot be empty",
+    ):
+        _load_file("   ")
+
+
+def test_load_text_file_reports_a_missing_file(tmp_path):
+    missing = tmp_path / "missing.txt"
+
+    with pytest.raises(
+        backend.ScriptExecutionError,
+        match="FileNotFoundError",
+    ):
+        _load_file(missing)
