@@ -4,8 +4,11 @@ Create a ComfyUI node from a small Python script. The script declares its input
 and output sockets and provides a `run()` function; choosing **Apply Script**
 updates the node to match those declarations.
 
-This extension is intended for local, trusted use. It deliberately executes
-ordinary Python with the same permissions as ComfyUI.
+> [!CAUTION]
+> **Scripts are executable Python code and are not sandboxed.**
+> Only load scripts and workflows from sources you trust. When queued, a script
+> runs with the same permissions as ComfyUI and can access your files, network,
+> credentials, and installed programs. Always review the code before running it.
 
 ## Install
 
