@@ -1,7 +1,8 @@
 # Script collection
 
 These files are complete source snippets for the Scripted Node. They are not
-registered as separate ComfyUI nodes.
+registered as separate ComfyUI nodes. They also appear as read-only entries in
+the **Script Browser** node.
 
 To use one:
 

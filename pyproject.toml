@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "comfyui-scripted-nodes"
-version = "0.1.0"
+version = "0.2.0"
 description = "A local trusted-code scripted node for ComfyUI"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,7 +16,16 @@ test = [
 ]
 
 [tool.setuptools]
-py-modules = ["scripted_node"]
+packages = ["comfyui_scripted_nodes"]
+package-dir = {comfyui_scripted_nodes = "."}
+include-package-data = true
+
+[tool.setuptools.package-data]
+comfyui_scripted_nodes = [
+    "scripts/*.md",
+    "scripts/**/*.py",
+    "web/*.js",
+]
 
 [tool.pytest.ini_options]
 addopts = "-ra"

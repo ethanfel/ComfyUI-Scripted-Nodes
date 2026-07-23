@@ -62,6 +62,48 @@ Ready-to-paste examples live in [`scripts/`](scripts/README.md). The first
 example, [`line_from_file.py`](scripts/text/line_from_file.py), reads a UTF-8
 text file and returns a requested 1-based line.
 
+## Saved script library
+
+User scripts are stored in:
+
+```text
+ComfyUI/models/scripted_nodes/
+```
+
+Names may contain subfolders, such as `text/line_picker`. The `.py` extension
+is added automatically. Absolute paths, `..`, hidden path components, symbolic
+links, and files outside this managed folder are rejected.
+
+### Save a script
+
+Add **Save Script**, enter a `script_name`, and paste the Python into `code`.
+Choose **Save Now** or press Ctrl/Cmd+Enter in the editor. The node can also
+save when queued and passes through the script source from its first output.
+
+Existing files are protected unless `overwrite` is enabled. Saving through
+the button uses the editor's current text; when `code` is connected, queue the
+node to save the connected value.
+
+### Browse, load, and delete scripts
+
+Add **Script Browser** and **Scripted Node**, then connect the browser's
+`script` output to the Scripted Node's `code` input. On an older ComfyUI
+frontend, choose **Enable Script Input** on the Scripted Node first.
+
+Choose a script and select **Load & Apply**. The browser copies the source into
+the main editor, applies its declared sockets, and also provides the source
+through the graph connection when queued. **Refresh Scripts** discovers files
+added outside ComfyUI.
+
+Bundled examples from this repository also appear in the browser and are
+read-only. **Delete Selected** is available only for user scripts under
+`models/scripted_nodes` and always asks for confirmation.
+
+The library endpoints reject request-controlled path traversal and links.
+They are not a sandbox against another local process running as the same user
+and concurrently changing the models directory; such a process is already
+inside this extension's trusted-code boundary.
+
 ## Script format
 
 Every script has three parts:
