@@ -28,8 +28,9 @@ git clone https://github.com/ethanfel/ComfyUI-Scripted-Nodes.git
 ```
 
 Restart ComfyUI, refresh the browser, and search the add-node menu for
-**Scripted Node**. There are no extra runtime dependencies beyond those
-already supplied by ComfyUI.
+**Scripted Node**. The scripted and library nodes add no Python-package
+dependencies beyond ComfyUI. The optional compatibility tester also requires a
+`git` executable on `PATH` and network access to public GitHub repositories.
 
 ## Quick start
 
@@ -108,6 +109,54 @@ The library endpoints reject request-controlled path traversal and links.
 They are not a sandbox against another local process running as the same user
 and concurrently changing the models directory; such a process is already
 inside this extension's trusted-code boundary.
+
+## Node pack compatibility tester
+
+Add **Node Pack Compatibility Tester** to estimate which classes from a GitHub
+node pack could later run through a temporary-node adapter.
+
+Enter:
+
+- `repository`: a public HTTPS `github.com/owner/repository` URL, or
+  `owner/repository`. Credentials and private repositories are not accepted.
+- `ref_kind`: the kind of revision to fetch (`default`, `branch`, `tag`, or
+  `commit`).
+- `ref`: the branch, tag, or full commit identifier; leave it empty when using
+  `default`.
+- `subdirectory`: an optional relative folder for a node pack inside a
+  monorepo.
+
+Choose **Test Compatibility** to see a grouped report directly in the node.
+The same human-readable report and its structured JSON are available as node
+outputs when connected downstream and queued. An unconnected tester does not
+perform network work during ordinary workflow queues.
+
+The classifications are deliberately conservative:
+
+- **Compatible** means static metadata matches the basic legacy
+  `NODE_CLASS_MAPPINGS`, `INPUT_TYPES`, `RETURN_TYPES`, and synchronous
+  `FUNCTION` contract, including compatible input arguments and a literal
+  output shape.
+- **Partial** means an adapter could probably call the class, but dynamic
+  schemas or returns, conditional registration, validation/caching hooks,
+  dependencies, server routes, output-node behavior, or custom UI may behave
+  differently.
+- **Unsupported** means the class uses a known blocker such as hidden, lazy, or
+  list inputs; list outputs; asynchronous execution; dynamic expansion; or a
+  V3-only node definition.
+
+> [!NOTE]
+> This is a static estimate, not an execution test. The tester downloads Git
+> objects into a temporary directory and parses regular Python source files
+> without checking them out, importing them, installing their dependencies, or
+> executing pack code. Runtime dependencies and dynamically generated schemas
+> therefore remain unverified. File, syntax-tree, report, temporary-disk, and
+> concurrent-scan limits reject unusually large packs; temporary data is
+> removed after each scan.
+
+Testing a pack does not install or register any of its nodes. Actual temporary
+execution will remain a separate, explicitly trusted action because importing
+a node pack executes Python with ComfyUI's permissions.
 
 ## Script format
 

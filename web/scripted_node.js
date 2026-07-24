@@ -4,7 +4,9 @@ import { api } from "../../scripts/api.js";
 const NODE_CLASS = "ComfyScriptedNode";
 const SCRIPT_BROWSER_CLASS = "ComfyScriptBrowserNode";
 const SAVE_SCRIPT_CLASS = "ComfySaveScriptNode";
+const NODE_PACK_TESTER_CLASS = "ComfyNodePackTesterNode";
 const SCHEMA_ROUTE = "/scripted_nodes/schema";
+const NODE_PACK_TEST_ROUTE = "/scripted_nodes/node-packs/test";
 const SCRIPT_ROUTES = Object.freeze({
     list: "/scripted_nodes/scripts",
     load: "/scripted_nodes/scripts/load",
@@ -14,6 +16,9 @@ const SCRIPT_ROUTES = Object.freeze({
 const SCHEMA_PROPERTY = "scripted_node_schema";
 const SCHEMA_VERSION_PROPERTY = "scripted_node_schema_version";
 const SCHEMA_VERSION = 1;
+const NODE_PACK_REPORT_PROPERTY = "node_pack_compatibility_report";
+const NODE_PACK_REPORT_JSON_PROPERTY = "node_pack_compatibility_json";
+const NODE_PACK_SOURCE_PROPERTY = "node_pack_compatibility_source";
 const MAX_OUTPUTS = 32;
 const MIN_NODE_WIDTH = 460;
 const MIN_EDITOR_HEIGHT = 220;
@@ -56,6 +61,25 @@ function injectStyles() {
             font-size: 12px !important;
             line-height: 1.4 !important;
             tab-size: 4;
+            white-space: pre;
+            overflow: auto;
+            resize: vertical;
+        }
+        .comfy-node-pack-report {
+            width: 100%;
+            min-height: 240px;
+            box-sizing: border-box;
+            padding: 10px;
+            border: 1px solid #555;
+            border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+            border-radius: 6px;
+            background: #111;
+            background: color-mix(in srgb, #111 90%, transparent);
+            color: #f2f2f2;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                         "Liberation Mono", "Courier New", monospace;
+            font-size: 12px;
+            line-height: 1.4;
             white-space: pre;
             overflow: auto;
             resize: vertical;
@@ -1079,6 +1103,397 @@ function setupSaveScript(node) {
     queueMicrotask(() => resizeAndRedraw(node, true));
 }
 
+function nodePackTestSource(node) {
+    return {
+        repository: String(widgetByName(node, "repository")?.value ?? "").trim(),
+        ref_kind: String(widgetByName(node, "ref_kind")?.value ?? "default"),
+        ref: String(widgetByName(node, "ref")?.value ?? "").trim(),
+        subdirectory: String(
+            widgetByName(node, "subdirectory")?.value ?? "",
+        ).trim(),
+    };
+}
+
+function nodePackSourceFingerprint(source) {
+    return JSON.stringify({
+        repository: source.repository,
+        ref_kind: source.ref_kind,
+        ref: source.ref,
+        subdirectory: source.subdirectory,
+    });
+}
+
+function setNodePackReportText(node, value) {
+    const text = String(value ?? "");
+    node._nodePackReportText = text;
+    if (node._nodePackReportElement) {
+        node._nodePackReportElement.value = text;
+    }
+    if (node._nodePackReportFallbackWidget) {
+        node._nodePackReportFallbackWidget.value = text;
+    }
+    node.setDirtyCanvas?.(true, true);
+}
+
+function nodePackStoredSourceFingerprint(source) {
+    if (!source || typeof source !== "object" || Array.isArray(source)) return null;
+    try {
+        return nodePackSourceFingerprint(source);
+    } catch (error) {
+        return null;
+    }
+}
+
+function persistNodePackReport(
+    node,
+    text,
+    report,
+    source,
+    { markGraphChanged = true } = {},
+) {
+    const reportJson =
+        typeof report === "string" ? report : JSON.stringify(report ?? {});
+    const sourceCopy = structuredCloneSafe(source);
+    const previousSourceFingerprint = nodePackStoredSourceFingerprint(
+        node.properties?.[NODE_PACK_SOURCE_PROPERTY],
+    );
+    const nextSourceFingerprint = nodePackSourceFingerprint(sourceCopy);
+    const materiallyChanged =
+        node.properties?.[NODE_PACK_REPORT_PROPERTY] !== String(text ?? "") ||
+        node.properties?.[NODE_PACK_REPORT_JSON_PROPERTY] !== reportJson ||
+        previousSourceFingerprint !== nextSourceFingerprint;
+
+    setNodePackReportText(node, text);
+    node.properties ??= {};
+    node.properties[NODE_PACK_REPORT_PROPERTY] = text;
+    node.properties[NODE_PACK_REPORT_JSON_PROPERTY] = reportJson;
+    node.properties[NODE_PACK_SOURCE_PROPERTY] = sourceCopy;
+    node._nodePackTestSourceFingerprint = nextSourceFingerprint;
+
+    if (materiallyChanged && markGraphChanged && !app.configuringGraph) {
+        node.graph?.change?.();
+    }
+}
+
+function addNodePackReportWidget(node) {
+    if (node._nodePackReportWidget || node._nodePackReportFallbackWidget) return;
+
+    const initial =
+        "Static compatibility estimate only — pack Python is not executed.\n\n" +
+        "Enter a GitHub repository and press Test Compatibility.";
+    if (typeof node.addDOMWidget === "function") {
+        const textarea = document.createElement("textarea");
+        textarea.className = "comfy-node-pack-report";
+        textarea.value = initial;
+        textarea.readOnly = true;
+        textarea.spellcheck = false;
+        textarea.wrap = "off";
+        textarea.title =
+            "Static compatibility report. This tester never imports pack Python.";
+        textarea.addEventListener("keydown", (event) => event.stopPropagation());
+
+        const widget = node.addDOMWidget(
+            "compatibility_report",
+            "textmultiline",
+            textarea,
+            {
+                serialize: false,
+                getValue: () => textarea.value,
+                setValue: (value) => {
+                    textarea.value = String(value ?? "");
+                },
+            },
+        );
+        widget.serialize = false;
+        widget.options ??= {};
+        widget.options.serialize = false;
+        widget.inputEl = textarea;
+        widget.computeSize = (width) => [
+            Math.max(Number(width) || 0, MIN_NODE_WIDTH),
+            260,
+        ];
+        node._nodePackReportWidget = widget;
+        node._nodePackReportElement = textarea;
+    } else {
+        const widget = node.addWidget(
+            "text",
+            "Compatibility Report",
+            initial,
+            () => {},
+            { multiline: true },
+        );
+        widget.serialize = false;
+        widget.disabled = true;
+        widget.options ??= {};
+        widget.options.serialize = false;
+        widget.computeSize = () => [MIN_NODE_WIDTH, 240];
+        node._nodePackReportFallbackWidget = widget;
+    }
+    node._nodePackReportText = initial;
+}
+
+function restoreNodePackReport(node) {
+    const stored = node.properties?.[NODE_PACK_REPORT_PROPERTY];
+    const source = node.properties?.[NODE_PACK_SOURCE_PROPERTY];
+    const storedFingerprint = nodePackStoredSourceFingerprint(source);
+    const currentFingerprint = nodePackSourceFingerprint(nodePackTestSource(node));
+    node._nodePackObservedSourceFingerprint = currentFingerprint;
+    node._nodePackTestSourceFingerprint = storedFingerprint;
+
+    if (
+        typeof stored === "string" &&
+        stored &&
+        storedFingerprint === currentFingerprint
+    ) {
+        setNodePackReportText(node, stored);
+    } else if (typeof stored === "string" && stored && storedFingerprint) {
+        setNodePackReportText(
+            node,
+            "Inputs changed after the last test.\n\n" +
+            "Press Test Compatibility to refresh.",
+        );
+    }
+}
+
+function handleNodePackInputChange(node, { force = false } = {}) {
+    const currentSource = nodePackTestSource(node);
+    const currentFingerprint = nodePackSourceFingerprint(currentSource);
+    const previousFingerprint = node._nodePackObservedSourceFingerprint;
+    node._nodePackObservedSourceFingerprint = currentFingerprint;
+    if (!force && currentFingerprint === previousFingerprint) return;
+    if (app.configuringGraph) return;
+
+    const requestWasActive = node._nodePackTesting === true;
+    node._nodePackTestRevision = (node._nodePackTestRevision || 0) + 1;
+    node._nodePackTesting = false;
+    node._nodePackActiveSourceFingerprint = null;
+    setButtonLabel(node._nodePackTestWidget, "Test Compatibility");
+
+    if (currentFingerprint === node._nodePackTestSourceFingerprint) {
+        restoreNodePackReport(node);
+        return;
+    }
+    if (node._nodePackTestSourceFingerprint || requestWasActive) {
+        setNodePackReportText(
+            node,
+            "Inputs changed after the last test.\n\n" +
+            "Press Test Compatibility to refresh.",
+        );
+    }
+}
+
+function wrapNodePackInputCallbacks(node) {
+    for (const name of ["repository", "ref_kind", "ref", "subdirectory"]) {
+        const widget = widgetByName(node, name);
+        if (!widget || widget._nodePackTesterCallbackWrapped) continue;
+        const originalCallback = widget.callback;
+        widget.callback = function () {
+            const result = originalCallback?.apply(this, arguments);
+            queueMicrotask(() => handleNodePackInputChange(node));
+            return result;
+        };
+        widget._nodePackTesterCallbackWrapped = true;
+    }
+}
+
+function nodePackReportText(payload) {
+    if (typeof payload?.report_text === "string") return payload.report_text;
+    if (typeof payload?.report?.report_text === "string") {
+        return payload.report.report_text;
+    }
+    throw new Error("Compatibility response is missing its text report");
+}
+
+function nodePackSummaryMessage(report) {
+    const summary = report?.summary;
+    if (!summary || typeof summary !== "object") return "Compatibility scan finished";
+    const compatible = Number(summary.compatible) || 0;
+    const partial = Number(summary.partial) || 0;
+    const unsupported = Number(summary.unsupported) || 0;
+    return (
+        `Compatibility estimate: ${compatible} compatible, ` +
+        `${partial} partial, ${unsupported} unsupported`
+    );
+}
+
+async function testNodePackCompatibility(node) {
+    if (node._nodePackTesting) return;
+    const source = nodePackTestSource(node);
+    const sourceFingerprint = nodePackSourceFingerprint(source);
+    if (!source.repository) {
+        toast("error", "Enter a GitHub repository before testing");
+        return;
+    }
+
+    const revision = (node._nodePackTestRevision || 0) + 1;
+    node._nodePackTestRevision = revision;
+    node._nodePackTesting = true;
+    node._nodePackActiveSourceFingerprint = sourceFingerprint;
+    setButtonLabel(node._nodePackTestWidget, "Testing…");
+    setNodePackReportText(
+        node,
+        "Fetching repository source and running a static scan…\n\n" +
+        "The pack's Python code is not being imported or executed.",
+    );
+    resizeAndRedraw(node);
+    try {
+        const payload = await fetchJson(
+            NODE_PACK_TEST_ROUTE,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(source),
+            },
+            "Node pack compatibility request",
+        );
+        if (revision !== node._nodePackTestRevision) return;
+        if (
+            nodePackSourceFingerprint(nodePackTestSource(node)) !==
+            sourceFingerprint
+        ) {
+            handleNodePackInputChange(node, { force: true });
+            return;
+        }
+        const report = payload?.report;
+        if (!report || typeof report !== "object" || Array.isArray(report)) {
+            throw new Error("Compatibility response is missing structured results");
+        }
+        const text = nodePackReportText(payload);
+        persistNodePackReport(node, text, report, source);
+        resizeAndRedraw(node);
+        setButtonLabel(node._nodePackTestWidget, "Tested ✓");
+        toast("success", nodePackSummaryMessage(report));
+    } catch (error) {
+        if (revision !== node._nodePackTestRevision) return;
+        if (
+            nodePackSourceFingerprint(nodePackTestSource(node)) !==
+            sourceFingerprint
+        ) {
+            handleNodePackInputChange(node, { force: true });
+            return;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        persistNodePackReport(
+            node,
+            `Test failed\n\n${message}`,
+            {},
+            source,
+        );
+        setButtonLabel(node._nodePackTestWidget, "Test failed");
+        toast("error", message);
+    } finally {
+        if (revision === node._nodePackTestRevision) {
+            node._nodePackTesting = false;
+            node._nodePackActiveSourceFingerprint = null;
+            setTimeout(() => {
+                if (
+                    !node._nodePackTesting &&
+                    revision === node._nodePackTestRevision
+                ) {
+                    setButtonLabel(
+                        node._nodePackTestWidget,
+                        "Test Compatibility",
+                    );
+                    node.setDirtyCanvas?.(true, true);
+                }
+            }, 2200);
+        }
+    }
+}
+
+function firstUiValue(value) {
+    if (Array.isArray(value)) return value.length ? value[0] : null;
+    return value;
+}
+
+function nodePackCompatibilitySource(message) {
+    let source = firstUiValue(message?.compatibility_source);
+    if (typeof source === "string") {
+        try {
+            source = JSON.parse(source);
+        } catch (error) {
+            return null;
+        }
+    }
+    if (!source || typeof source !== "object" || Array.isArray(source)) {
+        return null;
+    }
+    const names = ["repository", "ref_kind", "ref", "subdirectory"];
+    if (!names.every((name) => typeof source[name] === "string")) return null;
+    return Object.fromEntries(names.map((name) => [name, source[name]]));
+}
+
+function applyExecutedNodePackReport(node, message) {
+    const text = firstUiValue(
+        message?.compatibility_report ?? message?.report,
+    );
+    const reportJson = firstUiValue(
+        message?.compatibility_json ?? message?.report_json,
+    );
+    if (typeof text !== "string" || !text) return;
+    const source = nodePackCompatibilitySource(message);
+    if (!source) {
+        console.warn(
+            "[Scripted Node] Queued compatibility result is missing its source",
+        );
+        return;
+    }
+    if (
+        nodePackSourceFingerprint(source) !==
+        nodePackSourceFingerprint(nodePackTestSource(node))
+    ) {
+        console.info(
+            "[Scripted Node] Ignored a queued compatibility result for older inputs",
+        );
+        return;
+    }
+
+    let report = {};
+    if (typeof reportJson === "string" && reportJson) {
+        try {
+            report = JSON.parse(reportJson);
+        } catch (error) {
+            console.warn("[Scripted Node] Invalid queued compatibility JSON", error);
+        }
+    }
+    persistNodePackReport(node, text, report, source);
+    restoreNodePackReport(node);
+    resizeAndRedraw(node);
+}
+
+function setupNodePackTester(node) {
+    if (node._nodePackTesterFrontendReady) return;
+    node._nodePackTesterFrontendReady = true;
+    injectStyles();
+    addNodePackReportWidget(node);
+    wrapNodePackInputCallbacks(node);
+    restoreNodePackReport(node);
+
+    const widget = node.addWidget(
+        "button",
+        "Test Compatibility",
+        null,
+        () => void testNodePackCompatibility(node),
+    );
+    widget.serialize = false;
+    widget.options ??= {};
+    widget.options.serialize = false;
+    node._nodePackTestWidget = widget;
+
+    const onExecuted = node.onExecuted;
+    node.onExecuted = function (message) {
+        const result = onExecuted?.apply(this, arguments);
+        applyExecutedNodePackReport(this, message);
+        return result;
+    };
+
+    queueMicrotask(() => {
+        wrapNodePackInputCallbacks(node);
+        restoreNodePackReport(node);
+        resizeAndRedraw(node, true);
+    });
+}
+
 app.registerExtension({
     name: "comfy.scripted_node",
 
@@ -1117,6 +1532,25 @@ app.registerExtension({
                 const result = onConfigure?.apply(this, arguments);
                 setupSaveScript(this);
                 styleSaveCodeWidget(this);
+                return result;
+            };
+            return;
+        }
+
+        if (nodeData.name === NODE_PACK_TESTER_CLASS) {
+            const onNodeCreated = nodeType.prototype.onNodeCreated;
+            nodeType.prototype.onNodeCreated = function () {
+                const result = onNodeCreated?.apply(this, arguments);
+                setupNodePackTester(this);
+                return result;
+            };
+
+            const onConfigure = nodeType.prototype.onConfigure;
+            nodeType.prototype.onConfigure = function () {
+                const result = onConfigure?.apply(this, arguments);
+                setupNodePackTester(this);
+                wrapNodePackInputCallbacks(this);
+                restoreNodePackReport(this);
                 return result;
             };
             return;
