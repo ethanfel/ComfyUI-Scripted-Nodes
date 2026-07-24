@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "comfyui-scripted-nodes"
-version = "0.3.0"
-description = "A local trusted-code scripted node for ComfyUI"
+version = "0.4.0"
+description = "Scripted nodes and a live node-pack loader for ComfyUI"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []

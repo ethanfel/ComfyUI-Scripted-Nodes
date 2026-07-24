@@ -1,13 +1,19 @@
 # ComfyUI Scripted Nodes
 
-Create a ComfyUI node from a small Python script. The script declares its input
-and output sockets and provides a `run()` function; choosing **Apply Script**
-updates the node to match those declarations.
+Two ways to get a node into ComfyUI without installing a node pack:
+
+- **Scripted Node** — create a node from a small Python script. The script
+  declares its input and output sockets and provides a `run()` function;
+  choosing **Apply Script** updates the node to match those declarations.
+- **[Node Pack Loader](#node-pack-loader)** — point at a GitHub repository and
+  use its nodes directly. The pack is fetched, pinned to a commit and registered
+  into the running server; nothing is written to `custom_nodes` and ComfyUI is
+  not restarted. Unloading puts the registries back.
 
 > [!CAUTION]
-> **Scripts are executable Python code and are not sandboxed.**
-> Only load scripts and workflows from sources you trust. When queued, a script
-> runs with the same permissions as ComfyUI and can access your files, network,
+> **Scripts and node packs are executable Python code and are not sandboxed.**
+> Only load scripts, packs and workflows from sources you trust. When run, they
+> have the same permissions as ComfyUI and can access your files, network,
 > credentials, and installed programs. Always review the code before running it.
 
 ## Install
@@ -29,8 +35,13 @@ git clone https://github.com/ethanfel/ComfyUI-Scripted-Nodes.git
 
 Restart ComfyUI, refresh the browser, and search the add-node menu for
 **Scripted Node**. The scripted and library nodes add no Python-package
-dependencies beyond ComfyUI. The optional compatibility tester also requires a
-`git` executable on `PATH` and network access to public GitHub repositories.
+dependencies beyond ComfyUI. The compatibility tester and the pack loader also
+require a `git` executable on `PATH` and network access to public GitHub
+repositories.
+
+This repository is the one thing that does have to be installed the ordinary
+way: its own HTTP endpoints have to be registered while ComfyUI is building its
+route table, which only happens at startup.
 
 ## Quick start
 
@@ -154,9 +165,95 @@ The classifications are deliberately conservative:
 > concurrent-scan limits reject unusually large packs; temporary data is
 > removed after each scan.
 
-Testing a pack does not install or register any of its nodes. Actual temporary
-execution will remain a separate, explicitly trusted action because importing
-a node pack executes Python with ComfyUI's permissions.
+Testing a pack does not install or register any of its nodes. To actually run
+one, use the **Node Pack Loader** below, which is an explicitly trusted action
+because importing a node pack executes Python with ComfyUI's permissions.
+
+> [!NOTE]
+> The tester answers "would a static shim be able to re-implement this class?".
+> The loader does not need that shim -- it registers the pack's real classes -- so
+> most of what the tester calls *partial* or *unsupported* loads and runs
+> normally. Treat the report as a description of a pack, not as a prediction of
+> whether the loader will work.
+
+## Node pack loader
+
+Add **Node Pack Loader** to use a third-party node pack without installing it:
+nothing is written to `custom_nodes`, and ComfyUI is not restarted.
+
+The loader hands the pack to ComfyUI's own `nodes.load_custom_node`, so the
+pack's *real* classes are registered and the real executor runs them. Hidden
+inputs, `INPUT_IS_LIST`, list outputs, lazy evaluation, `IS_CHANGED`,
+`VALIDATE_INPUTS`, async execution and V3 schemas all behave exactly as they
+would in a normal install, and the nodes render their real widgets because
+`/object_info` is rebuilt from the live class mappings on every request.
+
+### Fetch a pack from GitHub
+
+Enter a `repository` (and optionally `ref_kind`, `ref` and `subdirectory`, which
+work exactly as they do in the tester) and choose **Fetch from GitHub**.
+
+The revision is resolved to a commit and materialized under
+`ComfyUI/user/scripted_node_packs/<host>/<owner>/<repository>/<commit>/<name>/`.
+Fetching runs no pack code. Every file's mode and Git blob id are recorded in a
+manifest so the tree can be checked later; **Verify Files** re-checks it, and a
+load is refused outright if a file the commit named has changed.
+
+Symbolic links and submodule entries are refused rather than materialized, and
+the tree is read with `ls-tree` and `cat-file` rather than `git archive`, whose
+`export-subst` and `export-ignore` attributes would let a repository serve
+different bytes than its commit names.
+
+### Load and unload
+
+Choose a pack and select **Load Pack**. Packs already on disk are offered too,
+including ones sitting in `custom_nodes/.disabled`. Loading asks for
+confirmation, then registers the pack's nodes; they appear in the node search
+immediately, with no page reload.
+
+**Unload Pack** removes the pack's node classes, display names, web mount,
+HTTP endpoints, `folder_paths` entries and modules again. What it cannot undo
+is reported instead of being papered over: a pack that spawned a thread,
+imported a C extension or patched a core module stays resident until ComfyUI
+restarts, and JavaScript it registered stays active in the browser tab until
+the page is reloaded.
+
+Loading is refused while the queue is running, when the pack's name is already
+claimed by an installed pack, and when a pack registers no nodes at all.
+
+### What the loader refuses to let a pack do
+
+A loaded pack is not sandboxed, but the loader does keep it from quietly
+taking over parts of ComfyUI that belong to somebody else:
+
+- **Node ids** are never overwritten; a pack whose ids collide with existing
+  ones has those entries skipped, and the collisions are reported.
+- **Display names** are restored for every node the pack did not itself
+  register, so it cannot retitle core nodes.
+- **The `/extensions` mount** uses the loader's validated pack name, not the
+  `project.name` a pack declares in its own `pyproject.toml`, which ComfyUI
+  does not validate and which would otherwise let a pack serve its JavaScript
+  in an installed pack's place.
+- **HTTP routes** the pack registers are served at their real paths, but ones
+  claiming a reserved core prefix (`/prompt`, `/userdata`, `/api`, `/view`, …),
+  using a wildcard that can match outside its own prefix, or duplicating an
+  existing path are refused and listed in the node's status.
+
+### Queueing the node does not load anything
+
+**Node Pack Loader** only reports which packs are currently loaded when it is
+queued; its outputs are a status string and the same information as JSON.
+Fetching and loading happen through its buttons. This keeps the invariant that
+opening or running someone else's workflow never downloads or executes a
+repository on your behalf.
+
+> [!CAUTION]
+> Loading a pack runs its Python inside ComfyUI with ComfyUI's permissions. It
+> is not a sandbox: a pack can read and write your files, reach the network, and
+> change your Python environment. Several popular packs run `pip install` from
+> their own `__init__.py` and will modify your environment the moment they are
+> loaded. Pinning to a commit and verifying the manifest tell you *which* code
+> runs; they do not limit what that code may do. Only load packs you trust.
 
 ## Script format
 
@@ -286,6 +383,21 @@ treated like a Python program:
 Loading a workflow and applying its schema do not execute its script. Queuing
 the node does.
 
+The same applies to node packs, more sharply, because a pack is somebody else's
+whole program rather than a script you can read at a glance:
+
+- fetching a pack executes nothing; loading it executes all of it, starting with
+  its `__init__.py`;
+- a pinned commit and a verified manifest establish *which* code runs, not what
+  it is allowed to do;
+- packs commonly `pip install` from their own `__init__.py`, which changes the
+  Python environment ComfyUI and every other pack share;
+- opening or queueing a workflow never fetches or loads a pack — only the
+  loader's buttons do; and
+- unloading restores ComfyUI's registries, not the process. Threads, native
+  modules, monkeypatches and already-evaluated JavaScript survive it, and the
+  node says so when they do.
+
 ## Development
 
 Install the test dependency and run the suite from this directory:
@@ -296,4 +408,22 @@ pytest
 ```
 
 The tests exercise schema parsing, registration, return-value mapping, default
-and optional inputs, error handling, and the fixed 32-output ComfyUI adapter.
+and optional inputs, error handling, the fixed 32-output ComfyUI adapter, the
+static pack analyser, and the pack loader — including the load/unload
+transaction against a stand-in for ComfyUI's registries, route filtering, cache
+manifest verification, and the cases where a pack tries to claim node ids,
+display names, web mounts or endpoints that are not its own.
+
+The loader's behaviour against real ComfyUI needs a booted server and real packs
+on disk, so it lives in a separate script rather than in the unit suite:
+
+```bash
+python tools/verify_pack_loader.py --comfy-root /path/to/ComfyUI \
+    --pack disabled:SomePack --repository owner/repository
+```
+
+It boots ComfyUI in process, loads each pack, and asserts that unloading leaves
+`NODE_CLASS_MAPPINGS`, `NODE_DISPLAY_NAME_MAPPINGS`, `EXTENSION_WEB_DIRS`,
+`LOADED_MODULE_DIRS`, the aiohttp router, `sys.path`, `sys.modules` and
+`folder_paths` exactly as it found them. It runs pack code, so it installs a
+`pip` firewall first and reports any pack that tried to install something.
