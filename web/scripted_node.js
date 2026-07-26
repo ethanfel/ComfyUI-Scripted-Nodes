@@ -299,6 +299,18 @@ function takeReusableSlot(slotsByKey, name, type) {
     return slot;
 }
 
+function takeSlotByIdentity(slotsByKey, slot) {
+    if (!slot) return null;
+    const key = slotKey(String(slot.name ?? ""), String(slot.type ?? ""));
+    const candidates = slotsByKey.get(key);
+    if (!candidates?.length) return null;
+    const index = candidates.indexOf(slot);
+    if (index < 0) return null;
+    candidates.splice(index, 1);
+    if (!candidates.length) slotsByKey.delete(key);
+    return slot;
+}
+
 function groupSlotsByNameAndType(slots) {
     const grouped = new Map();
     for (const slot of slots || []) {
@@ -353,10 +365,30 @@ function reconcileInputs(node, inputSpecs) {
     }
 }
 
-function reconcileOutputs(node, outputSpecs) {
+function reconcileOutputs(
+    node,
+    outputSpecs,
+    { reuseBackendPlaceholders = false } = {},
+) {
     const oldSlots = groupSlotsByNameAndType(node.outputs || []);
-    const nextOutputs = outputSpecs.map((spec) => {
-        const slot = takeReusableSlot(oldSlots, spec.name, spec.type) || {
+    const currentOutputs = node.outputs || [];
+    const nextOutputs = outputSpecs.map((spec, index) => {
+        let slot = null;
+        if (reuseBackendPlaceholders) {
+            // ComfyUI's generated configure() replaces saved dynamic output
+            // metadata with the backend output_N/* definition by index, while
+            // leaving the saved link IDs on those slots. Reclaim that exact
+            // slot during restoration so its links survive the rename.
+            const placeholder = currentOutputs[index];
+            if (
+                placeholder?.name === `output_${index + 1}` &&
+                placeholder?.type === "*"
+            ) {
+                slot = takeSlotByIdentity(oldSlots, placeholder);
+            }
+        }
+        slot ||= takeReusableSlot(oldSlots, spec.name, spec.type);
+        slot ||= {
             name: spec.name,
             type: spec.type,
             links: null,
@@ -402,9 +434,18 @@ function resizeAndRedraw(node, shrinkToFit = false) {
     app.graph?.setDirtyCanvas?.(true, true);
 }
 
-function reconcileSchema(node, schema, { shrinkToFit = false } = {}) {
+function reconcileSchema(
+    node,
+    schema,
+    {
+        shrinkToFit = false,
+        reuseBackendOutputPlaceholders = false,
+    } = {},
+) {
     reconcileInputs(node, schema.inputs);
-    reconcileOutputs(node, schema.outputs);
+    reconcileOutputs(node, schema.outputs, {
+        reuseBackendPlaceholders: reuseBackendOutputPlaceholders,
+    });
     resizeAndRedraw(node, shrinkToFit);
 }
 
@@ -441,7 +482,9 @@ function restoreSchema(node, info) {
                 typeof candidate === "string" && candidate
                     ? candidate
                     : JSON.stringify(schema);
-            reconcileSchema(node, schema);
+            reconcileSchema(node, schema, {
+                reuseBackendOutputPlaceholders: true,
+            });
             persistSchema(node, schema, schemaJson);
             return true;
         } catch (error) {

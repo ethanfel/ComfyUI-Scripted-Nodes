@@ -19,6 +19,7 @@ Primitive or other provider nodes for values such as `STRING` and `INT`.
 | Script | Purpose |
 | --- | --- |
 | [`image/load_image_from_folder.py`](image/load_image_from_folder.py) | Load one naturally sorted image from a directory using a 1-based counter. |
+| [`image/load_image_from_subfolders.py`](image/load_image_from_subfolders.py) | Recursively load images from an `original` tree and return the matching `upscaled` output folder. |
 | [`image/resize_to_recommended_size.py`](image/resize_to_recommended_size.py) | Choose the closest recommended aspect ratio and resize an image batch to that exact size. |
 
 ### `load_image_from_folder.py` behavior
@@ -33,6 +34,24 @@ Primitive or other provider nodes for values such as `STRING` and `INT`.
 - `file_name` contains only the basename without its extension.
 - An empty directory, unreadable image, or counter outside the available range
   produces a clear node execution error.
+
+### `load_image_from_subfolders.py` behavior
+
+- The supplied directory must be the `original` root. Every supported image
+  below it is included, including images directly in the root.
+- The 1-based counter follows natural ordering across the complete relative
+  path, so `pose2/image2.png` comes before `pose2/image10.png`, which comes
+  before `pose10/image1.png`.
+- `file_name` contains the selected basename without its extension.
+- `upscaled_folder_path` replaces the supplied `original` root with its
+  `upscaled` sibling while retaining the selected image's subfolder structure.
+  For example,
+  `/data/original/pov-ballsucking/selected_target/frame.png` produces
+  `/data/upscaled/pov-ballsucking/selected_target/`.
+- The returned folder path is absolute and ends in `/`. The script only
+  returns the path; it does not create the `upscaled` directory.
+- Image formats, EXIF handling, animated-file handling, and RGB conversion
+  match `load_image_from_folder.py`.
 
 ### `resize_to_recommended_size.py` behavior
 

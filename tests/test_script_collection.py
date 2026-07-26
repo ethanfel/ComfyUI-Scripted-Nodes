@@ -12,6 +12,9 @@ BACKEND_MODULE_NAME = "_scripted_node_collection_tests"
 LINE_FROM_FILE = ROOT / "scripts" / "text" / "line_from_file.py"
 LOAD_TEXT_FILE = ROOT / "scripts" / "text" / "load_text_file.py"
 LOAD_IMAGE_FROM_FOLDER = ROOT / "scripts" / "image" / "load_image_from_folder.py"
+LOAD_IMAGE_FROM_SUBFOLDERS = (
+    ROOT / "scripts" / "image" / "load_image_from_subfolders.py"
+)
 RESIZE_TO_RECOMMENDED_SIZE = (
     ROOT / "scripts" / "image" / "resize_to_recommended_size.py"
 )
@@ -37,6 +40,7 @@ backend = _load_backend()
 LINE_CODE = LINE_FROM_FILE.read_text(encoding="utf-8")
 LOAD_CODE = LOAD_TEXT_FILE.read_text(encoding="utf-8")
 FOLDER_IMAGE_CODE = LOAD_IMAGE_FROM_FOLDER.read_text(encoding="utf-8")
+SUBFOLDER_IMAGE_CODE = LOAD_IMAGE_FROM_SUBFOLDERS.read_text(encoding="utf-8")
 RESIZE_CODE = RESIZE_TO_RECOMMENDED_SIZE.read_text(encoding="utf-8")
 
 
@@ -517,3 +521,128 @@ def test_load_image_from_folder_reports_a_corrupt_image(tmp_path):
         match=r"Could not load image `broken\.png`",
     ):
         _load_folder_image(folder, 1)
+
+
+def _load_subfolder_image(directory_path, counter):
+    schema = backend.parse_script_schema(SUBFOLDER_IMAGE_CODE)
+    result = backend.ComfyScriptedNode().execute(
+        code=SUBFOLDER_IMAGE_CODE,
+        schema_json=backend.schema_to_json(schema),
+        directory_path=str(directory_path),
+        counter=counter,
+    )
+    return result[0], result[1], result[2]
+
+
+def test_load_image_from_subfolders_declares_expected_schema():
+    schema = backend.parse_script_schema(SUBFOLDER_IMAGE_CODE)
+
+    assert schema.inputs == [
+        {"name": "directory_path", "type": "STRING", "options": {}},
+        {
+            "name": "counter",
+            "type": "INT",
+            "options": {"default": 1, "min": 1, "step": 1},
+        },
+    ]
+    assert schema.outputs == [
+        {"name": "image", "type": "IMAGE"},
+        {"name": "file_name", "type": "STRING"},
+        {"name": "upscaled_folder_path", "type": "STRING"},
+    ]
+
+
+def test_load_image_from_subfolders_uses_recursive_natural_order(tmp_path):
+    original = tmp_path / "enough-content" / "original"
+    pose2 = original / "pose2" / "selected_target"
+    pose10 = original / "pose10" / "selected_target"
+    pose2.mkdir(parents=True)
+    pose10.mkdir(parents=True)
+    _write_test_image(pose2 / "image10.png", (0, 255, 0))
+    _write_test_image(pose2 / "image2.png", (255, 0, 0))
+    _write_test_image(pose10 / "image1.png", (0, 0, 255))
+    (pose2 / "notes.txt").write_text("not an image", encoding="utf-8")
+
+    image, file_name, upscaled_folder = _load_subfolder_image(original, 2)
+
+    assert tuple(image.shape) == (1, 2, 3, 3)
+    assert image[0, 0, 0].tolist() == pytest.approx([0.0, 1.0, 0.0])
+    assert file_name == "image10"
+    assert upscaled_folder == (
+        f"{(original.parent / 'upscaled' / 'pose2' / 'selected_target').as_posix()}/"
+    )
+    assert not (original.parent / "upscaled").exists()
+
+
+def test_load_image_from_subfolders_maps_the_requested_example(tmp_path):
+    original = tmp_path / "enough-content" / "original"
+    source_folder = original / "pov-ballsucking" / "selected_target"
+    source_folder.mkdir(parents=True)
+    _write_test_image(source_folder / "frame001.webp")
+
+    _, file_name, upscaled_folder = _load_subfolder_image(
+        f"{original.as_posix()}/",
+        1,
+    )
+
+    assert file_name == "frame001"
+    assert upscaled_folder == (
+        f"{(original.parent / 'upscaled' / 'pov-ballsucking' / 'selected_target').as_posix()}/"
+    )
+
+
+def test_load_image_from_subfolders_maps_root_level_images(tmp_path):
+    original = tmp_path / "enough-content" / "original"
+    original.mkdir(parents=True)
+    _write_test_image(original / "cover.png")
+
+    _, file_name, upscaled_folder = _load_subfolder_image(original, 1)
+
+    assert file_name == "cover"
+    assert upscaled_folder == f"{(original.parent / 'upscaled').as_posix()}/"
+
+
+@pytest.mark.parametrize("counter", [0, -1, 2])
+def test_load_image_from_subfolders_rejects_out_of_range_counter(
+    tmp_path,
+    counter,
+):
+    original = tmp_path / "original"
+    original.mkdir()
+    (original / "only.png").write_bytes(b"not opened")
+
+    with pytest.raises(
+        backend.ScriptExecutionError,
+        match=rf"counter {counter} is outside 1\.\.1",
+    ):
+        _load_subfolder_image(original, counter)
+
+
+def test_load_image_from_subfolders_requires_original_root(tmp_path):
+    images = tmp_path / "images"
+    images.mkdir()
+
+    with pytest.raises(
+        backend.ScriptExecutionError,
+        match=r"directory named `original`",
+    ):
+        _load_subfolder_image(images, 1)
+
+
+def test_load_image_from_subfolders_rejects_empty_and_missing_trees(tmp_path):
+    original = tmp_path / "original"
+    original.mkdir()
+    nested = original / "nested"
+    nested.mkdir()
+    (nested / "notes.txt").write_text("not an image", encoding="utf-8")
+
+    with pytest.raises(
+        backend.ScriptExecutionError,
+        match="No supported image files found recursively",
+    ):
+        _load_subfolder_image(original, 1)
+    with pytest.raises(
+        backend.ScriptExecutionError,
+        match="Image directory does not exist",
+    ):
+        _load_subfolder_image(tmp_path / "missing" / "original", 1)
