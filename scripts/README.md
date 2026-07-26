@@ -37,14 +37,16 @@ Primitive or other provider nodes for values such as `STRING` and `INT`.
 
 ### `load_image_from_subfolders.py` behavior
 
-- The supplied directory must be the `original` root. Every supported image
-  below it is included, including images directly in the root.
+- The supplied directory may be the `original` root or any directory inside
+  it, such as `original/matting-press`. Every supported image below the
+  supplied directory is included, including images directly in that directory.
 - The 1-based counter follows natural ordering across the complete relative
   path, so `pose2/image2.png` comes before `pose2/image10.png`, which comes
   before `pose10/image1.png`.
 - `file_name` contains the selected basename without its extension.
 - `upscaled_folder_path` replaces the supplied `original` root with its
-  `upscaled` sibling while retaining the selected image's subfolder structure.
+  `upscaled` sibling while retaining the selected image's complete subfolder
+  structure.
   For example,
   `/data/original/pov-ballsucking/selected_target/frame.png` produces
   `/data/upscaled/pov-ballsucking/selected_target/`.

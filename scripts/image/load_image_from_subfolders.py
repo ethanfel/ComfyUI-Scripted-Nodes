@@ -76,30 +76,34 @@ def _load_image(path):
     return torch.from_numpy(pixels).unsqueeze(0)
 
 
-def _upscaled_folder(original_directory, image_path):
-    if original_directory.name != "original":
+def _upscaled_folder(image_path):
+    folder_parts = list(image_path.parent.parts)
+    original_indexes = [
+        index for index, part in enumerate(folder_parts) if part == "original"
+    ]
+    if not original_indexes:
         raise ValueError(
-            "directory_path must point to a directory named `original` "
-            "so it can be mapped to `upscaled`"
+            "directory_path must point to `original` or one of its "
+            "subdirectories so it can be mapped to `upscaled`"
         )
 
-    relative_folder = image_path.parent.relative_to(original_directory)
-    return original_directory.parent / "upscaled" / relative_folder
+    folder_parts[original_indexes[-1]] = "upscaled"
+    return Path(*folder_parts)
 
 
 def run(directory_path, counter):
     if not isinstance(directory_path, str) or not directory_path.strip():
         raise ValueError("directory_path cannot be empty")
 
-    directory = Path(directory_path).expanduser().absolute()
+    directory = Path(directory_path.strip()).expanduser().absolute()
     if not directory.exists():
         raise FileNotFoundError(f"Image directory does not exist: {directory}")
     if not directory.is_dir():
         raise NotADirectoryError(f"Image path is not a directory: {directory}")
-    if directory.name != "original":
+    if "original" not in directory.parts:
         raise ValueError(
-            "directory_path must point to a directory named `original` "
-            "so it can be mapped to `upscaled`"
+            "directory_path must point to `original` or one of its "
+            "subdirectories so it can be mapped to `upscaled`"
         )
 
     image_paths = _list_images(directory)
@@ -115,6 +119,6 @@ def run(directory_path, counter):
         "image": _load_image(selected_path),
         "file_name": selected_path.stem,
         "upscaled_folder_path": (
-            f"{_upscaled_folder(directory, selected_path).as_posix()}/"
+            f"{_upscaled_folder(selected_path).as_posix()}/"
         ),
     }

@@ -84,8 +84,8 @@ batch to its exact dimensions, while
 1-based counter to load one naturally sorted image and return its filename
 without the extension.
 [`load_image_from_subfolders.py`](scripts/image/load_image_from_subfolders.py)
-recursively scans an `original` directory and returns the corresponding
-`upscaled` subfolder path for the selected image.
+recursively scans an `original` directory or one of its subdirectories and
+returns the corresponding `upscaled` subfolder path for the selected image.
 
 ## Saved script library
 

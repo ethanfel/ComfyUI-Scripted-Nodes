@@ -591,6 +591,26 @@ def test_load_image_from_subfolders_maps_the_requested_example(tmp_path):
     )
 
 
+def test_load_image_from_subfolders_accepts_a_directory_inside_original(
+    tmp_path,
+):
+    original = tmp_path / "enough-content" / "original"
+    input_directory = original / "matting-press"
+    source_folder = input_directory / "selected_target"
+    source_folder.mkdir(parents=True)
+    _write_test_image(source_folder / "frame001.png")
+
+    _, file_name, upscaled_folder = _load_subfolder_image(
+        input_directory,
+        1,
+    )
+
+    assert file_name == "frame001"
+    assert upscaled_folder == (
+        f"{(original.parent / 'upscaled' / 'matting-press' / 'selected_target').as_posix()}/"
+    )
+
+
 def test_load_image_from_subfolders_maps_root_level_images(tmp_path):
     original = tmp_path / "enough-content" / "original"
     original.mkdir(parents=True)
@@ -618,13 +638,13 @@ def test_load_image_from_subfolders_rejects_out_of_range_counter(
         _load_subfolder_image(original, counter)
 
 
-def test_load_image_from_subfolders_requires_original_root(tmp_path):
+def test_load_image_from_subfolders_requires_original_ancestor(tmp_path):
     images = tmp_path / "images"
     images.mkdir()
 
     with pytest.raises(
         backend.ScriptExecutionError,
-        match=r"directory named `original`",
+        match=r"point to `original` or one of its subdirectories",
     ):
         _load_subfolder_image(images, 1)
 
