@@ -14,6 +14,38 @@ To use one:
 The current Scripted Node creates linkable sockets for per-script inputs. Use
 Primitive or other provider nodes for values such as `STRING` and `INT`.
 
+## Image
+
+| Script | Purpose |
+| --- | --- |
+| [`image/load_image_from_folder.py`](image/load_image_from_folder.py) | Load one naturally sorted image from a directory using a 1-based counter. |
+| [`image/resize_to_recommended_size.py`](image/resize_to_recommended_size.py) | Choose the closest recommended aspect ratio and resize an image batch to that exact size. |
+
+### `load_image_from_folder.py` behavior
+
+- `counter = 1` loads the first image in the directory, `counter = 2` loads
+  the second, and so on.
+- Filenames use natural ordering, so `image2.png` comes before `image10.png`.
+- Supported extensions are BMP, GIF, JPEG, PNG, TIFF, and WebP,
+  case-insensitively. Only files directly inside the directory are considered.
+- EXIF orientation is applied, animated files use their first frame, and the
+  image is returned as a one-image RGB batch.
+- `file_name` contains only the basename without its extension.
+- An empty directory, unreadable image, or counter outside the available range
+  produces a clear node execution error.
+
+### `resize_to_recommended_size.py` behavior
+
+- The selected target is the closest aspect-ratio match among `1024×1024`,
+  `896×1152`, `832×1216`, `1152×896`, and `1216×832`.
+- Images are center-cropped only as much as needed to match the selected aspect
+  ratio, so they are not stretched or padded.
+- Downscaling uses area resampling. Inputs smaller than their selected target
+  are upscaled with bicubic resampling.
+- The complete batch is resized, and the selected dimensions are returned
+  through `target_width` and `target_height`.
+- An image already at its selected dimensions is returned unchanged.
+
 ## Text
 
 | Script | Purpose |

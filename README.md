@@ -77,7 +77,12 @@ Ready-to-paste examples live in [`scripts/`](scripts/README.md).
 [`load_text_file.py`](scripts/text/load_text_file.py) returns an entire UTF-8
 text file with numbered lines, while
 [`line_from_file.py`](scripts/text/line_from_file.py) returns a requested
-1-based line.
+1-based line. [`resize_to_recommended_size.py`](scripts/image/resize_to_recommended_size.py)
+chooses the closest recommended aspect ratio and center-crops/resizes an IMAGE
+batch to its exact dimensions, while
+[`load_image_from_folder.py`](scripts/image/load_image_from_folder.py) uses a
+1-based counter to load one naturally sorted image and return its filename
+without the extension.
 
 ## Saved script library
 
